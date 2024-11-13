@@ -141,10 +141,55 @@ RUN --mount=type=cache,target=/root/.ccache \
 RUN cd dist/linux-$GOARCH && \
     tar --exclude runners -cf - . | pigz --best > ../ollama-linux-$GOARCH.tgz
 
+FROM --platform=linux/ppc64le redhat/ubi9:9.3 AS cpu-builder-ppc64le
+ARG CMAKE_VERSION
+ARG GOLANG_VERSION
+COPY ./scripts/rh_linux_deps.sh /
+RUN CMAKE_VERSION=${CMAKE_VERSION} GOLANG_VERSION=${GOLANG_VERSION} sh /rh_linux_deps.sh
+ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:/usr/local/bin:$PATH
+COPY --from=llm-code / /go/src/github.com/ollama/ollama/
+ARG OLLAMA_CUSTOM_CPU_DEFS
+ARG CGO_CFLAGS
+ENV GOARCH=ppc64le
+WORKDIR /go/src/github.com/ollama/ollama/llm/generate
+
+#FROM --platform=linux/arm64 cpu-builder-ppc64le AS cpu-build-ppc64le
+#RUN --mount=type=cache,target=/root/.ccache \
+#   OLLAMA_SKIP_STATIC_GENERATE=1 OLLAMA_CPU_TARGET="cpu" bash gen_linux.sh
+#RUN cd llm/build/linux/ppc64le/cpu
+#RUN make install
+
+FROM --platform=linux/ppc64le cpu-builder-ppc64le AS cpu-build-ppc64le
+RUN --mount=type=cache,target=/root/.ccache  go generate ./...
+WORKDIR /go/src/github.com/ollama/ollama
+#RUN go clean -modcache
+RUN go generate ./...
+WORKDIR /go/src/github.com/ollama/ollama/llm/build/linux/ppc64le/cpu
+RUN ls   
+RUN make install
+
+
+FROM --platform=linux/ppc64le cpu-build-ppc64le AS build-ppc64le
+ENV CGO_ENABLED=1
+ENV LD_LIBRARY_PATH=/go/src/github.com/ollama/ollama/llm/build/linux/ppc64le/cpu/bin
+ARG GOLANG_VERSION
+WORKDIR /go/src/github.com/ollama/ollama
+COPY . .
+COPY --from=cpu-build-ppc64le /go/src/github.com/ollama/ollama/llm/build/ llm/build/
+ARG GOFLAGS
+ARG CGO_CFLAGS
+#RUN --mount=type=cache,target=/root/.ccache \
+#    go build -trimpath -o dist/linux-ppc64le/bin/ollama .
+RUN go build .
+RUN cd dist/linux-$GOARCH && \
+    tar --exclude runners -cf - . | pigz --best > ../ollama-linux-$GOARCH.tgz
+    
 FROM --platform=linux/amd64 scratch AS dist-amd64
 COPY --from=build-amd64 /go/src/github.com/ollama/ollama/dist/ollama-linux-*.tgz /
 FROM --platform=linux/arm64 scratch AS dist-arm64
 COPY --from=build-arm64 /go/src/github.com/ollama/ollama/dist/ollama-linux-*.tgz /
+FROM --platform=linux/ppc64le scratch AS dist-ppc64le
+COPY --from=build-ppc64le /go/src/github.com/ollama/ollama/dist/ollama-linux-*.tgz 
 FROM dist-$TARGETARCH AS dist
 
 
@@ -208,7 +253,24 @@ ENV OLLAMA_HOST 0.0.0.0
 ENTRYPOINT ["/bin/ollama"]
 CMD ["serve"]
 
-FROM runtime-$TARGETARCH
+FROM --platform=linux/amd64 runtime-$TARGETARCH
+EXPOSE 11434
+ENV OLLAMA_HOST=0.0.0.0
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV NVIDIA_VISIBLE_DEVICES=all
+
+FROM --platform=linux/arm64 runtime-$TARGETARCH
+EXPOSE 11434
+ENV OLLAMA_HOST=0.0.0.0
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV NVIDIA_VISIBLE_DEVICES=all
+
+#FROM runtime-$TARGETARCH
+FROM redhat/ubi9:9.3
 EXPOSE 11434
 ENV OLLAMA_HOST 0.0.0.0
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
