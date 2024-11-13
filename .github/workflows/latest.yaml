@@ -7,7 +7,12 @@ on:
 jobs:
   update-latest:
     environment: release
-    runs-on: linux
+    strategy:
+      matrix:
+        runner:
+          - linux
+          - ubuntu-22.04-ppc64le
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Login to Docker Hub
