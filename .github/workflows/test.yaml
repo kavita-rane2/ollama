@@ -282,6 +282,95 @@ jobs:
       - uses: golangci/golangci-lint-action@v6
         with:
           args: --timeout 8m0s -v
+   
+  lint-ppc64le:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        arch: [ppc64le]
+    runs-on: Linux
+    env:
+      GOARCH: $(uname -m )
+      CGO_ENABLED: '1'  
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          sudo apt-get install wget
+          export GO_VERSION=${GO_VERSION:-1.22.5}
+          #export GOROOT=${GOROOT:-"/usr/local/go"}
+          #export GOPATH=${GOPATH:-$HOME/go}
+          wget https://golang.org/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
+          sudo mkdir $HOME/go
+          sudo tar xvzf go${GO_VERSION}.linux-ppc64le.tar.gz -C $HOME/go
+          #sudo rm -rf go${GO_VERSION}.linux-ppc64le.tar.gz
+          echo "go installed"
+          export GOPATH=$HOME/go
+          export GOROOT=$HOME/go
+          export PATH=$PATH:$GOPATH/go/bin
+          echo $PATH
+          cd /go/go/bin
+          echo " Go version check"
+          #sudo apt-get install -y git golang 1.22.5
+          go version
+          case ${{ env.GOARCH }} in
+            ppc64le) echo ARCH=ppc64le ;;
+          esac >>$GITHUB_ENV
+        shell: bash
+      - name: Build and install plugins 
+        run: |
+          export PATH=$PATH:/go/go/bin
+          git clone https://github.com/golangci/example-plugin-linter.git
+          cd example-plugin-linter
+          go build -o '${{ github.workspace }}/.plugins/example.so' -buildmode=plugin plugin/example.go
+        working-directory: ${{ runner.temp }}
+        env:
+          CGO_ENABLED: 1 lint-ppc64le:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        arch: [ppc64le]
+    runs-on: Linux
+    env:
+      GOARCH: $(uname -m )
+      CGO_ENABLED: '1'  
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          sudo apt-get install wget
+          export GO_VERSION=${GO_VERSION:-1.22.5}
+          #export GOROOT=${GOROOT:-"/usr/local/go"}
+          #export GOPATH=${GOPATH:-$HOME/go}
+          wget https://golang.org/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
+          sudo mkdir $HOME/go
+          sudo tar xvzf go${GO_VERSION}.linux-ppc64le.tar.gz -C $HOME/go
+          #sudo rm -rf go${GO_VERSION}.linux-ppc64le.tar.gz
+          echo "go installed"
+          export GOPATH=$HOME/go
+          export GOROOT=$HOME/go
+          export PATH=$PATH:$GOPATH/go/bin
+          echo $PATH
+          cd /go/go/bin
+          echo " Go version check"
+          #sudo apt-get install -y git golang 1.22.5
+          go version
+          case ${{ env.GOARCH }} in
+            ppc64le) echo ARCH=ppc64le ;;
+          esac >>$GITHUB_ENV
+        shell: bash
+      - name: Build and install plugins 
+        run: |
+          export PATH=$PATH:/go/go/bin
+          git clone https://github.com/golangci/example-plugin-linter.git
+          cd example-plugin-linter
+          go build -o '${{ github.workspace }}/.plugins/example.so' -buildmode=plugin plugin/example.go
+        working-directory: ${{ runner.temp }}
+        env:
+          CGO_ENABLED: 1
+          
   test:
     strategy:
       matrix:
@@ -312,7 +401,88 @@ jobs:
         shell: bash
       - run: go build
       - run: go test -v ./...
-
+     
+ test-ppc64le:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        arch: [ppc64le]
+    runs-on: ubuntu-22.04-ppc64le      
+    env:
+      GOARCH: $(uname -m )
+      CGO_ENABLED: '1'
+      GOPROXY: https://proxy.golang.org,direct
+      GOROOT:   
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          sudo apt-get install wget
+          export GO_VERSION=${GO_VERSION:-1.22.5}
+          #export GOROOT=${GOROOT:-"/usr/local/go"}
+          #export GOPATH=${GOPATH:-$HOME/go}
+          wget https://golang.org/dl/go${GO_VERSION}.linux-ppc64le.tar.gz
+          sudo mkdir $HOME/go
+          sudo tar xvzf go${GO_VERSION}.linux-ppc64le.tar.gz -C /usr/local
+          #sudo rm -rf go${GO_VERSION}.linux-ppc64le.tar.gz
+          echo "go installed"
+          #export GOPATH=$HOME/go
+          #export GOROOT=$HOME/go
+          export PATH=$PATH:/usr/local/go/bin
+          echo $PATH
+          # cd /go/go/bin
+          echo " Go version check"
+          #sudo apt-get install -y git golang 1.22.5
+          go version      
+      - run: |
+          case ${{ env.GOARCH }} in
+            ppc64le) echo GOARCH=ppc64le ;;
+          esac >>$GITHUB_ENV
+        shell: bash
+      - run: | 
+          export GOPATH=$HOME/go
+          export GOROOT=/usr/local/go
+          export PATH=$PATH:/usr/local/go/bin
+          echo $PATH
+          echo " verify Go version "
+          go version 
+          sudo chmod +777 $HOME/go
+          sudo apt-get install -y cmake gcc
+          go generate ./...
+      - run: |
+          echo "Running go build "
+          OLLAMA_HOME=`pwd`
+          export GOPATH=$HOME/go
+          export GOROOT=/usr/local/go
+          export PATH=$PATH:/usr/local/go/bin
+          sudo chmod -R 777 /usr/local
+          sudo chmod -R 777 /usr/local/go
+          #sudo chmod +777 /usr/local/
+          cd $OLLAMA_HOME/llm/build/linux/$GOARCH/cpu
+          echo "Running make install"
+          make install
+          export LD_LIBRARY_PATH=$OLLAMA_HOME/llm/build/linux/$GOARCH/cpu/bin
+          cd  $OLLAMA_HOME
+          echo $GOROOT
+          sudo mkdir $HOME/.gocache
+          sudo chmod -R 777 $HOME/.gocache
+          export GOCACHE=$HOME/.gocache
+          echo "Running go Build ."
+          go mod tidy
+          go build .
+          go test -v ./...
+  patches:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.RUNNERS == 'True' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify patches carry all the changes
+        run: |
+          cd llama && ./sync.sh && git diff --compact-summary --exit-code .
   patches:
     needs: [changes]
     if: ${{ needs.changes.outputs.RUNNERS == 'True' }}
