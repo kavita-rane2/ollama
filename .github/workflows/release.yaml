@@ -543,7 +543,46 @@ jobs:
           path: |
             dist/*linux*
             !dist/*-cov
-
+  # Linux ppc64le assets built using the container based build
+  build-linux-ppc64le:
+    environment: release
+    runs-on: ubuntu-22.04-ppc64le
+    env:
+      PLATFORM: linux/ppc64le
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set Version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+      - name: 'Install Docker'
+        run: |
+          # Add Docker's official GPG key:
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install ca-certificates curl gnupg lsb-release init -y
+          sudo mkdir -m 0755 -p /etc/apt/keyrings
+          sudo chmod  -R 777 /etc/apt/
+          sudo chmod  -R 777 /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin -y
+          sudo dockerd > /dev/null 2>&1 &
+          echo " Docker Install compled !!"   
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
+      - run: |
+          ./scripts/build_linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-ppc64le
+          path: |
+            dist/*linux*
+            !dist/*-cov
+          
   # Container image build
   build-container-image:
     environment: release
@@ -552,6 +591,7 @@ jobs:
         runner:
           - linux
           - linux-arm64
+          - ubuntu-22.04-ppc64le
     runs-on: ${{ matrix.runner }}
     env:
       FINAL_IMAGE_REPO: ollama/ollama
@@ -575,6 +615,20 @@ jobs:
           sudo usermod -aG docker $USER
           sudo apt-get install acl
           sudo setfacl --modify user:$USER:rw /var/run/docker.sock
+      - name: 'Install Docker for ppc64le'
+        if: ${{ startsWith(matrix.runner, 'ubuntu-22.04-ppc64le') }}
+        run: |
+          # Add Docker's official GPG key:
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install ca-certificates curl gnupg lsb-release init -y
+          sudo mkdir -m 0755 -p /etc/apt/keyrings
+          sudo chmod  -R 777 /etc/apt/
+          sudo chmod  -R 777 /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin -y
+          sudo dockerd > /dev/null 2>&1 &
+          echo " Docker Install compled !!"
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -592,6 +646,7 @@ jobs:
           case ${machine} in
             x86_64) echo ARCH=amd64; echo PLATFORM_PAIR=linux-amd64 ;;
             aarch64) echo ARCH=arm64; echo PLATFORM_PAIR=linux-arm64 ;;
+            ppc64le) echo ARCH=ppc64le; echo PLATFORM_PAIR=linux-ppc64le ;;
           esac >>$GITHUB_ENV
           echo GOFLAGS="'-ldflags=-w -s \"-X=github.com/ollama/ollama/version.Version=${{ env.DOCKER_METADATA_OUTPUT_VERSION }}\" \"-X=github.com/ollama/ollama/server.mode=release\"'" >>$GITHUB_ENV
       - name: Set up Docker Buildx
@@ -601,27 +656,27 @@ jobs:
         with:
           username: ${{ vars.DOCKER_USER }}
           password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: "."
-          platforms: linux/${{ env.ARCH }}
-          build-args: |
-            GOFLAGS
-          outputs: type=image,name=${{ env.FINAL_IMAGE_REPO }},push-by-digest=true,name-canonical=true,push=true
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
+     # - name: Build and push by digest
+     #   id: build
+     #   uses: docker/build-push-action@v6
+     #   with:
+      #    context: "."
+      #    platforms: linux/${{ env.ARCH }}
+      #    build-args: |
+      #      GOFLAGS
+      #    outputs: type=image,name=${{ env.FINAL_IMAGE_REPO }},push-by-digest=true,name-canonical=true,push=true
+      #- name: Export digest
+      #  run: |
+      #    mkdir -p /tmp/digests
+      #    digest="${{ steps.build.outputs.digest }}"
+      #    touch "/tmp/digests/${digest#sha256:}"
+      #- name: Upload digest
+      #  uses: actions/upload-artifact@v4
+      #  with:
+      #    name: digests-${{ env.PLATFORM_PAIR }}
+      #    path: /tmp/digests/*
+      #    if-no-files-found: error
+       #   retention-days: 1
   merge:
     environment: release
     runs-on: linux
